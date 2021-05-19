@@ -334,7 +334,6 @@ class MainPage(Screen):
 
 
 class EditPage(Screen):
-
     def __init__(self, instance, **kw):
         super().__init__(**kw)
         list_url_time = command_sql.select_url_timer(instance.ids)
