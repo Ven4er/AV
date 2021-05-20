@@ -119,6 +119,7 @@ Builder.load_string('''
                 
                 TextInput:
                     id: input_field_edit_url
+                    multiline: False
                 
                 Label:
                     text: 'Таймер в минутах'
@@ -126,6 +127,8 @@ Builder.load_string('''
                 TextInput:
                     id: input_field_edit_timer
                     input_filter: 'int'
+                    multiline: False
+
                     
             GridLayout:
                 cols: 1
@@ -216,6 +219,11 @@ class CommandSQL:
         rows = self.cur.fetchall()
         return rows
 
+    def select_all_url(self):
+        self.cur.execute('SELECT url FROM sites')
+        rows = self.cur.fetchall()
+        return rows
+
     def select_url_timer(self, dict_id_url):
         for key, values in dict_id_url.items():
             self.cur.execute('SELECT url, timer FROM sites WHERE site_id=?', [(str(key))])
@@ -236,7 +244,7 @@ class MainPage(Screen):
         self.output_widgets()
 
     def change_top_menu_status_label(self):
-        time.sleep(5)
+        time.sleep(7)
         self.top_menu_status_label.text = ''
 
     def thread_output_widgets(self):
@@ -248,24 +256,74 @@ class MainPage(Screen):
         t1_following_a_link.start()
 
     def append_new_site(self):
-        date = datetime.datetime.today().strftime('[%d-%m-%Y    %H:%M]: ')
-        if self.input_field_new_url.text != '' and self.input_field_new_timer.text:
-            try:
-                command_sql.insert_new_data(self.input_field_new_url.text, self.input_field_new_timer.text)
-                self.top_menu_status_label.text = 'Запись добавлена.'
-                self.input_field_new_url.text = ''
-                self.input_field_new_timer.text = ''
-            except ArithmeticError as err:
-                file_log = open('error.log', 'a')
-                log_info = date + str(err)
-                file_log.write(log_info + '\n')
-                file_log.close()
-                self.top_menu_status_label.text = 'Ошибка!'
-        else:
-            self.top_menu_status_label.text = 'Заполни поля "URL" и "Время (мин)."'
-        self.thread_output_widgets()
+        check_for_uniqueness = self.check_for_uniqueness(self.ids.input_field_new_url.text)
         t1_top_menu_status_label = Thread(target=self.change_top_menu_status_label)
-        t1_top_menu_status_label.start()
+        date = datetime.datetime.today().strftime('[%d-%m-%Y    %H:%M]: ')
+        if check_for_uniqueness:
+            if self.input_field_new_url.text != '' and self.input_field_new_timer.text:
+
+                try:
+                    command_sql.insert_new_data(self.input_field_new_url.text, self.input_field_new_timer.text)
+                    self.top_menu_status_label.text = 'Запись добавлена.'
+                    self.input_field_new_url.text = ''
+                    self.input_field_new_timer.text = ''
+
+                except ArithmeticError as err:
+                    file_log = open('error.log', 'a')
+                    log_info = date + str(err)
+                    file_log.write(log_info + '\n')
+                    file_log.close()
+                    self.top_menu_status_label.text = 'Ошибка!'
+                    t1_top_menu_status_label.start()
+
+            else:
+                self.top_menu_status_label.text = 'Заполни поля "URL" и "Время (мин)"'
+            self.thread_output_widgets()
+            t1_top_menu_status_label.start()
+
+        elif check_for_uniqueness is None:
+            t1_top_menu_status_label.start()
+
+        else:
+            self.top_menu_status_label.text = 'Такой сайт уже добавлен'
+            t1_top_menu_status_label.start()
+
+    def check_for_uniqueness(self, url):
+        date = datetime.datetime.today().strftime('[%d-%m-%Y    %H:%M]: ')
+        result = None
+        try:
+            new_url = url[url.find('://') + 3:].split('/')[0].split('.')
+            db_urls = command_sql.select_all_url()
+
+            if new_url[0] == 'www':
+                del new_url[0]
+                new_domain_name = '.'.join(new_url)
+            else:
+                new_domain_name = '.'.join(new_url)
+
+            for db_url in db_urls:
+                slice_db_url = db_url[0]
+                slice_db_url = slice_db_url[slice_db_url.find('://') + 3:].split('/')[0].split('.')
+
+                if slice_db_url[0] == 'www':
+                    del slice_db_url[0]
+                    db_domain_name = '.'.join(slice_db_url)
+                else:
+                    db_domain_name = '.'.join(slice_db_url)
+
+                if db_domain_name == new_domain_name:
+                    result = False
+                else:
+                    result = True
+
+        except AttributeError as err:
+            file_log = open('error.log', 'a')
+            log_info = date + str(err)
+            file_log.write(log_info + '\n')
+            file_log.close()
+            self.top_menu_status_label.text = 'Ошибка!'
+
+        return result
 
     def delete_widget(self, instance):
         command_sql.delete_data(instance.ids)
@@ -305,10 +363,10 @@ class MainPage(Screen):
 
             if time.time() < target_time:
                 status = 'Disable'
-                btn_start = Button(text=url[:20], disabled=True, ids={id_site: url})
+                btn_start = Button(text=url[:25], disabled=True, ids={id_site: url})
             else:
                 status = 'Active'
-                btn_start = Button(text=url[:20], ids={id_site: url}, on_press=self.thread_following_a_link)
+                btn_start = Button(text=url[:25], ids={id_site: url}, on_press=self.thread_following_a_link)
 
             list_objects.append(
                 Rotation(id_site, url, timer, target_time, note, btn_note, btn_start, btn_del, btn_edit, status))
@@ -356,7 +414,8 @@ class EditPage(Screen):
 
         try:
             command_sql.insert_edit_url_timer_note(self.id_site, self.ids.input_field_edit_url.text,
-                                                   self.ids.input_field_edit_timer.text, self.ids.input_field_edit_note.text)
+                                                   self.ids.input_field_edit_timer.text,
+                                                   self.ids.input_field_edit_note.text)
             self.ids.edit_status_label.text = 'Сохранение успешно!'
         except ArithmeticError as err:
             file_log = open('error.log', 'a')
